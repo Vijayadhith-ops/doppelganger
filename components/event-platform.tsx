@@ -1424,22 +1424,39 @@ function Admin({
     }
   };
 
-  const persist = async (next: Store) => {
-    setStore(next);
-    const r = await fetch("/api/admin/state", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-admin-key": "admin@dp",
-        "x-admin-auth": "admin-session-active",
-      },
-      body: JSON.stringify({ type: "replace", store: next }),
-    });
-    if (!r.ok) {
-      const d = await r.json();
-      setError(d.error || "Save failed");
+  const persist = async (nextOrFn: Store | ((prev: Store) => Store)) => {
+    let next: Store;
+    if (typeof nextOrFn === "function") {
+      setStore((prev) => {
+        next = nextOrFn(prev);
+        return next;
+      });
     } else {
-      setError("");
+      next = nextOrFn;
+      setStore(next);
+    }
+    // @ts-ignore
+    if (!next || typeof next !== "object" || !Array.isArray(next.participants) || !Array.isArray(next.challenges)) {
+      return;
+    }
+    try {
+      const r = await fetch("/api/admin/state", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-admin-key": "admin@dp",
+          "x-admin-auth": "admin-session-active",
+        },
+        body: JSON.stringify({ type: "replace", store: next }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setError(d.error || "Save failed");
+      } else {
+        setError("");
+      }
+    } catch {
+      // ignore network glitches
     }
   };
 
@@ -2349,17 +2366,15 @@ function Challenges({
 
   const handleSaveChallenge = async (updated: Challenge) => {
     try {
-      setStore((prev) => {
-        const nextChallenges = prev.challenges.some((c) => c.code === updated.code)
-          ? prev.challenges.map((c) => (c.code === updated.code ? updated : c))
-          : [...prev.challenges, updated];
-        const nextStore = { ...prev, challenges: nextChallenges };
-        try {
-          localStorage.setItem(CHALLENGES_STORAGE, JSON.stringify(nextChallenges));
-          localStorage.setItem(STORE, JSON.stringify(nextStore));
-        } catch {}
-        return nextStore;
-      });
+      const nextChallenges = store.challenges.some((c) => c.code === updated.code)
+        ? store.challenges.map((c) => (c.code === updated.code ? updated : c))
+        : [...store.challenges, updated];
+      const nextStore = { ...store, challenges: nextChallenges };
+
+      try {
+        localStorage.setItem(CHALLENGES_STORAGE, JSON.stringify(nextChallenges));
+        localStorage.setItem(STORE, JSON.stringify(nextStore));
+      } catch {}
 
       const r = await fetch("/api/admin/state", {
         method: "POST",
@@ -2371,14 +2386,9 @@ function Challenges({
         body: JSON.stringify({ type: "update-challenge", challenge: updated }),
       });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
-      if (d.store) {
-        setStore((prev) => ({
-          ...prev,
-          ...d.store,
-          challenges: prev.challenges.map((c) => (c.code === updated.code ? updated : c)),
-        }));
-      }
+      if (!r.ok) throw new Error(d.error || "Failed to update challenge");
+      
+      setStore(d.store || nextStore);
       showToast(`Challenge ${updated.code} (${updated.title}) saved successfully.`);
     } catch (e) {
       alert(e instanceof Error ? e.message : "Failed to update challenge");
@@ -2387,17 +2397,15 @@ function Challenges({
 
   const handleDeleteChallenge = async (code: string) => {
     try {
-      setStore((prev) => {
-        const nextChallenges = prev.challenges.filter((c) => c.code !== code);
-        const fallback = nextChallenges[0]?.code || "MIRROR-01";
-        const nextParticipants = prev.participants.map((p) => (p.challenge === code ? { ...p, challenge: fallback } : p));
-        const nextStore = { ...prev, challenges: nextChallenges, participants: nextParticipants };
-        try {
-          localStorage.setItem(CHALLENGES_STORAGE, JSON.stringify(nextChallenges));
-          localStorage.setItem(STORE, JSON.stringify(nextStore));
-        } catch {}
-        return nextStore;
-      });
+      const nextChallenges = store.challenges.filter((c) => c.code !== code);
+      const fallback = nextChallenges[0]?.code || "MIRROR-01";
+      const nextParticipants = store.participants.map((p) => (p.challenge === code ? { ...p, challenge: fallback } : p));
+      const nextStore = { ...store, challenges: nextChallenges, participants: nextParticipants };
+
+      try {
+        localStorage.setItem(CHALLENGES_STORAGE, JSON.stringify(nextChallenges));
+        localStorage.setItem(STORE, JSON.stringify(nextStore));
+      } catch {}
 
       const r = await fetch("/api/admin/state", {
         method: "POST",
@@ -2409,8 +2417,9 @@ function Challenges({
         body: JSON.stringify({ type: "delete-challenge", code }),
       });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
-      if (d.store) setStore(d.store);
+      if (!r.ok) throw new Error(d.error || "Failed to delete challenge");
+      
+      setStore(d.store || nextStore);
       showToast(`Challenge ${code} deleted successfully.`);
     } catch (e) {
       alert(e instanceof Error ? e.message : "Failed to delete challenge");
@@ -2432,7 +2441,7 @@ function Challenges({
         body: JSON.stringify({ type: "reset-challenges" }),
       });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
+      if (!r.ok) throw new Error(d.error || "Failed to reset challenges");
       if (d.store) setStore(d.store);
       setConfirmReset(false);
       showToast("Reset all challenges to default presets.");

@@ -11,12 +11,14 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!await isAdmin(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const b = await request.json().catch(() => ({}));
-  if (b.type === "replace" && b.store && Array.isArray(b.store.participants) && Array.isArray(b.store.challenges)) {
+  const actionType = String(b.type || b.action || "");
+
+  if ((actionType === "replace" || b.type === "replace") && b.store && Array.isArray(b.store.participants) && Array.isArray(b.store.challenges)) {
     await writeStore(b.store);
     return Response.json({ store: b.store });
   }
   const s = await readStore(), now = Date.now();
-  if (b.type === "round") {
+  if (actionType === "round" || b.type === "round") {
     if (b.action === "PREPARE" && s.status === "WAITING") s.status = "READY";
     else if (b.action === "START" && (s.status === "READY" || s.status === "WAITING")) {
       s.status = "LIVE";
@@ -57,7 +59,7 @@ export async function POST(request: Request) {
     } else {
       return Response.json({ error: "Action is invalid for current round state" }, { status: 409 });
     }
-  } else if (b.type === "assign") {
+  } else if (actionType === "assign" || b.type === "assign") {
     if (["LIVE", "PAUSED", "ENDED"].includes(s.status)) return Response.json({ error: "Assignments are locked" }, { status: 409 });
     const size = Math.max(1, Math.min(20, Number(b.size) || 5));
     let list = [...s.participants];
@@ -72,7 +74,7 @@ export async function POST(request: Request) {
         .map((p, i) => ({ ...p, challenge: s.challenges[Math.floor(i / size) % s.challenges.length].code }))
         .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
     }
-  } else if (b.type === "update-challenge") {
+  } else if (actionType === "update-challenge" || b.type === "update-challenge") {
     const ch = b.challenge || {};
     if (!ch.code) return Response.json({ error: "Missing challenge code" }, { status: 400 });
     const idx = s.challenges.findIndex((c) => c.code === ch.code);
@@ -105,14 +107,14 @@ export async function POST(request: Request) {
         }));
       }
     }
-  } else if (b.type === "delete-challenge") {
+  } else if (actionType === "delete-challenge" || b.type === "delete-challenge") {
     s.challenges = s.challenges.filter((c) => c.code !== b.code);
     const fallbackCode = s.challenges[0]?.code || "";
     s.participants = s.participants.map((p) => (p.challenge === b.code ? { ...p, challenge: fallbackCode } : p));
-  } else if (b.type === "reset-challenges" || b.type === "clear-challenges") {
+  } else if (actionType === "reset-challenges" || b.type === "reset-challenges" || actionType === "clear-challenges" || b.type === "clear-challenges") {
     s.challenges = [];
     s.participants = s.participants.map((p) => ({ ...p, challenge: "" }));
-  } else if (b.type === "add-participant") {
+  } else if (actionType === "add-participant" || b.type === "add-participant") {
     const p = b.participant;
     if (!p || !p.code) return Response.json({ error: "Missing participant data" }, { status: 400 });
     const idx = s.participants.findIndex((item) => item.code === p.code);
@@ -128,11 +130,11 @@ export async function POST(request: Request) {
       });
     }
     s.participants.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
-  } else if (b.type === "delete-participant") {
+  } else if (actionType === "delete-participant" || b.type === "delete-participant") {
     s.participants = s.participants.filter((p) => p.code !== b.code);
-  } else if (b.type === "clear-participants") {
+  } else if (actionType === "clear-participants" || b.type === "clear-participants") {
     s.participants = [];
-  } else if (b.type === "generate-participants") {
+  } else if (actionType === "generate-participants" || b.type === "generate-participants") {
     const count = Math.max(1, Math.min(100, Number(b.count) || 20));
     s.participants = Array.from({ length: count }, (_, i) => ({
       code: `DG-${String(i + 1).padStart(2, "0")}`,
@@ -141,7 +143,7 @@ export async function POST(request: Request) {
       challenge: s.challenges.length > 0 ? s.challenges[i % s.challenges.length].code : "",
       status: "REGISTERED",
     }));
-  } else if (b.type === "participant-retry") {
+  } else if (actionType === "participant-retry" || b.type === "participant-retry") {
     s.participants = s.participants.map((p) =>
       p.code === b.code ? { ...p, status: "VERIFIED", submittedAt: undefined, projectUrl: undefined, figmaUrl: undefined } : p
     );
