@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck
-import { readStore, writeStore, setCookie, createParticipantSession } from "@/lib/event-db";
+import { readStore, writeStore, setCookie, createParticipantSession, signToken } from "@/lib/event-db";
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
@@ -25,8 +25,10 @@ export async function POST(request: Request) {
     await writeStore(store);
   }
 
-  const token = crypto.randomUUID() + crypto.randomUUID();
   const now = new Date().toISOString();
+  const expiresAt = Date.now() + 6 * 3600e3;
+  const rawId = crypto.randomUUID();
+  const token = signToken(`participant:${code}:${expiresAt}:${rawId}`);
 
   await createParticipantSession(token, code, now);
 

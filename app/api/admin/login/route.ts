@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck
-import { setCookie, createAdminSession } from "@/lib/event-db";
+import { setCookie, createAdminSession, signToken } from "@/lib/event-db";
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
@@ -17,9 +17,10 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid admin password. Use 'admin@dp'" }, { status: 401 });
   }
 
-  const token = crypto.randomUUID() + crypto.randomUUID();
   const now = new Date();
   const expires = new Date(now.getTime() + 8 * 3600e3);
+  const rawId = crypto.randomUUID();
+  const token = signToken(`admin:${expires.getTime()}:${rawId}`);
 
   await createAdminSession(token, now, expires);
 
