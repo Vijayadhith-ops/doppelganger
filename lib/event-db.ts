@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment, @typescript-eslint/no-explicit-any */
 // @ts-nocheck
 import { seed, type EventStore } from "./event-seed";
+import { getSupabase } from "./supabase";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -122,6 +123,29 @@ export async function ensureSchema() {
 }
 
 export async function readStore(): Promise<EventStore> {
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("doppelganger_state")
+        .select("store")
+        .eq("id", "round_01")
+        .single();
+      if (data && data.store) {
+        g.__dg_store = data.store;
+        return data.store as EventStore;
+      }
+      if (error && error.code === "PGRST116") {
+        const initial = seed();
+        await supabase.from("doppelganger_state").insert({ id: "round_01", store: initial });
+        g.__dg_store = initial;
+        return initial;
+      }
+    } catch (err) {
+      console.warn("Supabase read fallback to local:", err);
+    }
+  }
+
   const db = getDb();
   if (db) {
     try {
@@ -129,17 +153,6 @@ export async function readStore(): Promise<EventStore> {
       const row = await db.prepare("SELECT payload FROM event_state WHERE id=1").first<{ payload: string }>();
       if (row) {
         const s: EventStore = JSON.parse(row.payload);
-        const defaultSeed = seed();
-        if (Array.isArray(s.participants) && s.participants.length < defaultSeed.participants.length) {
-          const existingCodes = new Set(s.participants.map((p) => p.code));
-          for (const p of defaultSeed.participants) {
-            if (!existingCodes.has(p.code)) {
-              s.participants.push(p);
-            }
-          }
-          s.participants.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
-          await writeStore(s);
-        }
         return s;
       }
       const value = seed();
@@ -162,6 +175,51 @@ export async function readStore(): Promise<EventStore> {
 export async function writeStore(value: EventStore) {
   g.__dg_store = value;
   writeTmpStore(value);
+
+  const supabase = getSupabase();
+  if (supabase) {
+    try {
+      await supabase
+        .from("doppelganger_state")
+        .upsert({ id: "round_01", store: value, updated_at: new Date().toISOString() });
+
+      if (Array.isArray(value.participants) && value.participants.length > 0) {
+        const rows = value.participants.map((p) => ({
+          code: p.code,
+          name: p.name,
+          college: p.college,
+          challenge: p.challenge || "",
+          status: p.status,
+          verified_at: p.verifiedAt || null,
+          submitted_at: p.submittedAt || null,
+          prompt: p.prompt || null,
+          submission_image: p.submissionImage || null,
+          project_url: p.projectUrl || null,
+          figma_url: p.figmaUrl || null,
+          updated_at: new Date().toISOString(),
+        }));
+        supabase.from("participants").upsert(rows, { onConflict: "code" }).catch(() => {});
+      }
+
+      if (Array.isArray(value.challenges) && value.challenges.length > 0) {
+        const cRows = value.challenges.map((c) => ({
+          code: c.code,
+          title: c.title,
+          difficulty: c.difficulty || "Medium",
+          color: c.color || "#7357ff",
+          description: c.description || "",
+          image_url: c.imageUrl || "",
+          specs: c.specs || [],
+          category: c.category || "Mobile",
+          updated_at: new Date().toISOString(),
+        }));
+        supabase.from("challenges").upsert(cRows, { onConflict: "code" }).catch(() => {});
+      }
+    } catch (err) {
+      console.warn("Supabase write fallback:", err);
+    }
+  }
+
   const db = getDb();
   if (db) {
     try {
