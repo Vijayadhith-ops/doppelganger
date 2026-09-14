@@ -56,17 +56,12 @@ export async function POST(request:Request){
       }
     }
   } else if(b.type==="delete-challenge"){
-    if(s.challenges.length<=1)return Response.json({error:"At least one challenge must remain active."},{status:400});
     s.challenges=s.challenges.filter(c=>c.code!==b.code);
-    const fallbackCode = s.challenges[0]?.code || "MIRROR-01";
+    const fallbackCode = s.challenges[0]?.code || "";
     s.participants = s.participants.map(p => p.challenge === b.code ? { ...p, challenge: fallbackCode } : p);
-  } else if(b.type==="reset-challenges"){
-    s.challenges=[
-      {code:"MIRROR-01",title:"Commerce Mobile",difficulty:"Medium",color:"#7357ff",description:"Recreate a premium mobile shopping experience."},
-      {code:"MIRROR-02",title:"Fintech Dashboard",difficulty:"Advanced",color:"#2f7cff",description:"Recreate a data-rich personal finance dashboard."},
-      {code:"MIRROR-03",title:"Travel Discovery",difficulty:"Medium",color:"#00a78e",description:"Recreate a calm destination discovery interface."},
-      {code:"MIRROR-04",title:"Food Delivery",difficulty:"Medium",color:"#f16a3d",description:"Recreate a fast, friendly ordering experience."}
-    ];
+  } else if(b.type==="reset-challenges" || b.type==="clear-challenges"){
+    s.challenges=[];
+    s.participants = s.participants.map(p => ({ ...p, challenge: "" }));
   } else if(b.type==="participant-retry")s.participants=s.participants.map(p=>p.code===b.code?{...p,status:"VERIFIED",submittedAt:undefined,projectUrl:undefined,figmaUrl:undefined}:p);
   else return Response.json({error:"Unknown action"},{status:400});
  await writeStore(s);return Response.json({store:s});

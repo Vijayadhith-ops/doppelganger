@@ -89,12 +89,7 @@ type Store = {
   grace: number;
 };
 
-const challenges: Challenge[] = [
-  { code: "MIRROR-01", title: "Commerce Mobile", difficulty: "Medium", color: "#7357ff", description: "Recreate a premium mobile shopping experience." },
-  { code: "MIRROR-02", title: "Fintech Dashboard", difficulty: "Advanced", color: "#2f7cff", description: "Recreate a data-rich personal finance dashboard." },
-  { code: "MIRROR-03", title: "Travel Discovery", difficulty: "Medium", color: "#00a78e", description: "Recreate a calm destination discovery interface." },
-  { code: "MIRROR-04", title: "Food Delivery", difficulty: "Medium", color: "#f16a3d", description: "Recreate a fast, friendly ordering experience." },
-];
+const challenges: Challenge[] = [];
 
 const names = [
   "Aarav", "Aisha", "Akash", "Ananya", "Arjun", "Deepa", "Gokul", "Harini", "Ishaan", "Janani",
@@ -108,7 +103,7 @@ const makeParticipants = (): Participant[] =>
     code: `DG-${String(i + 1).padStart(2, "0")}`,
     name: names[i % names.length],
     college: i % 3 === 0 ? "K.L.N. College of Engineering" : "Guest Institution",
-    challenge: challenges[i % challenges.length].code,
+    challenge: "",
     status: "REGISTERED",
   }));
 
@@ -118,7 +113,7 @@ const initial: Store = {
   endsAt: null,
   pausedRemaining: 1800,
   participants: makeParticipants(),
-  challenges,
+  challenges: [],
   grace: 30,
 };
 
@@ -127,13 +122,30 @@ const safeLoad = (): Store => {
   try {
     const saved = localStorage.getItem(STORE);
     const savedChallenges = localStorage.getItem(CHALLENGES_STORAGE);
-    const parsedChallenges: Challenge[] | null = savedChallenges ? JSON.parse(savedChallenges) : null;
+    let parsedChallenges: Challenge[] | null = null;
+    if (savedChallenges) {
+      try {
+        parsedChallenges = JSON.parse(savedChallenges);
+      } catch {}
+    }
+
+    let loadedChallenges: Challenge[] = [];
+    if (Array.isArray(parsedChallenges)) {
+      loadedChallenges = parsedChallenges;
+    } else if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.challenges)) {
+          // Filter out default old mock sample names without custom uploads
+          loadedChallenges = parsed.challenges.filter(
+            (c: Challenge) => c.imageUrl || (c.title !== "Commerce Mobile" && c.title !== "Fintech Dashboard" && c.title !== "Travel Discovery" && c.title !== "Food Delivery")
+          );
+        }
+      } catch {}
+    }
 
     if (!saved) {
-      if (Array.isArray(parsedChallenges) && parsedChallenges.length > 0) {
-        return { ...initial, challenges: parsedChallenges };
-      }
-      return initial;
+      return { ...initial, challenges: loadedChallenges };
     }
     const parsed = JSON.parse(saved);
     let participants = Array.isArray(parsed.participants) && parsed.participants.length ? parsed.participants : initial.participants;
@@ -145,20 +157,6 @@ const safeLoad = (): Store => {
         }
       }
       participants.sort((a: Participant, b: Participant) => a.code.localeCompare(b.code, undefined, { numeric: true }));
-    }
-
-    let loadedChallenges = Array.isArray(parsed.challenges) && parsed.challenges.length ? parsed.challenges : initial.challenges;
-    if (Array.isArray(parsedChallenges) && parsedChallenges.length > 0) {
-      const pMap = new Map(parsedChallenges.map((c: Challenge) => [c.code, c]));
-      loadedChallenges = loadedChallenges.map((c: Challenge) => {
-        const fromStorage = pMap.get(c.code);
-        return fromStorage ? { ...c, ...fromStorage, imageUrl: fromStorage.imageUrl || c.imageUrl || "" } : c;
-      });
-      for (const ch of parsedChallenges) {
-        if (!loadedChallenges.some((c: Challenge) => c.code === ch.code)) {
-          loadedChallenges.push(ch);
-        }
-      }
     }
 
     return {
@@ -1187,128 +1185,13 @@ function MockReference({ challenge, expanded = false, allowToggle = true }: { ch
               <img src={imageUrl} alt={challenge?.title || "Challenge UI Reference"} className="mock-uploaded-img" />
             </div>
           ) : (
-            <>
-              <div className="mock-nav">
-                <span />
-                <i />
-                <i />
+            <div style={{ display: "grid", placeItems: "center", minHeight: "260px", padding: "24px", textAlign: "center", color: "#687387" }}>
+              <div style={{ width: "48px", height: "48px", borderRadius: "14px", background: "rgba(115,87,255,0.12)", color: "#9c88ff", display: "grid", placeItems: "center", marginBottom: "12px" }}>
+                <Upload size={22} />
               </div>
-
-              {code === "MIRROR-01" && (
-                <>
-                  <div className="mock-hero">
-                    <small>SUMMER DROP</small>
-                    <b>{challenge?.title || "Commerce Mobile"}</b>
-                    <span>Exclusive minimalist collection</span>
-                    <button>Shop now</button>
-                  </div>
-                  <div className="mock-title">
-                    <b>Trending Items</b>
-                    <span>See all</span>
-                  </div>
-                  <div className="mock-products">
-                    <div className="prod-item">
-                      <i />
-                      <b>Silk Overshirt</b>
-                      <small>$89.00</small>
-                    </div>
-                    <div className="prod-item">
-                      <i />
-                      <b>Chrono Watch</b>
-                      <small>$195.00</small>
-                    </div>
-                    <div className="prod-item">
-                      <i />
-                      <b>Canvas Bag</b>
-                      <small>$64.00</small>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {code === "MIRROR-02" && (
-                <>
-                  <div className="mock-hero fintech">
-                    <small>TOTAL BALANCE</small>
-                    <b>$48,290.50</b>
-                    <span>+$2,450.00 (4.8% this week)</span>
-                    <div className="hero-pills">
-                      <span>Send</span>
-                      <span>Receive</span>
-                      <span>Invest</span>
-                    </div>
-                  </div>
-                  <div className="mock-title">
-                    <b>Recent Activity</b>
-                    <span>Analytics</span>
-                  </div>
-                  <div className="mock-list">
-                    <div className="tx-row">
-                      <span className="tx-icon" />
-                      <div>
-                        <b>Figma Pro</b>
-                        <small>Subscription</small>
-                      </div>
-                      <strong>-$15.00</strong>
-                    </div>
-                    <div className="tx-row">
-                      <span className="tx-icon green" />
-                      <div>
-                        <b>Client Payout</b>
-                        <small>Wire Transfer</small>
-                      </div>
-                      <strong className="green">+$3,200</strong>
-                    </div>
-                    <div className="tx-row">
-                      <span className="tx-icon" />
-                      <div>
-                        <b>Cloudflare CDN</b>
-                        <small>Hosting</small>
-                      </div>
-                      <strong>-$20.00</strong>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {!["MIRROR-01", "MIRROR-02"].includes(code) && (
-                <>
-                  <div className="mock-hero" style={{ background: `linear-gradient(145deg, ${c}, #101520)` }}>
-                    <small>ROUND 01 CHALLENGE</small>
-                    <b>{challenge?.title || "Custom UI"}</b>
-                    <span>{challenge?.difficulty || "Medium"} Difficulty</span>
-                    <button style={{ background: "#fff", color: "#000" }}>Inspect</button>
-                  </div>
-                  <div className="mock-title">
-                    <b>Interface Elements</b>
-                    <span>Details</span>
-                  </div>
-                  <div className="mock-list">
-                    <div className="tx-row">
-                      <span className="tx-icon" style={{ background: `${c}33` }} />
-                      <div>
-                        <b>Header & Hero Lockup</b>
-                        <small>Typography & CTA</small>
-                      </div>
-                    </div>
-                    <div className="tx-row">
-                      <span className="tx-icon" style={{ background: `${c}33` }} />
-                      <div>
-                        <b>Interactive Cards Grid</b>
-                        <small>Component Replication</small>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              <div className="mock-tabs">
-                <span />
-                <span />
-                <span />
-                <span />
-              </div>
-            </>
+              <b style={{ color: "#d2d8e4", fontSize: "14px" }}>{challenge?.title || "No Image Uploaded"}</b>
+              <small style={{ fontSize: "12px", color: "#798396", marginTop: "4px" }}>Upload a challenge UI design screenshot</small>
+            </div>
           )}
         </div>
       </div>
@@ -1358,110 +1241,12 @@ function MockReference({ challenge, expanded = false, allowToggle = true }: { ch
               <img src={imageUrl} alt={challenge?.title || "Challenge UI Reference"} className="mock-uploaded-desktop-img" />
             </div>
           ) : (
-            <div className="mock-vector-desktop">
-              <div className="desktop-nav">
-                <div className="desktop-brand">
-                  <span className="desktop-logo" style={{ background: c }} />
-                  <b>{challenge?.title || "Web Application"}</b>
-                </div>
-                <div className="desktop-links">
-                  <span className="active">Overview</span>
-                  <span>Features</span>
-                  <span>Products</span>
-                  <span>Analytics</span>
-                </div>
-                <div className="desktop-nav-cta">
-                  <button style={{ background: c, color: "#fff" }}>Live Target</button>
-                </div>
+            <div style={{ display: "grid", placeItems: "center", minHeight: "280px", padding: "32px", textAlign: "center", color: "#687387" }}>
+              <div style={{ width: "52px", height: "52px", borderRadius: "14px", background: "rgba(115,87,255,0.12)", color: "#9c88ff", display: "grid", placeItems: "center", marginBottom: "12px" }}>
+                <Upload size={24} />
               </div>
-
-              {code === "MIRROR-01" && (
-                <div className="desktop-hero-layout">
-                  <div className="desktop-hero-banner" style={{ background: `linear-gradient(135deg, ${c}, #0a0d14)` }}>
-                    <small>SUMMER DROP · 2026</small>
-                    <h2>Commerce Pro Desktop</h2>
-                    <p>Exclusive minimalist collection with ultra-responsive grids & instant checkout.</p>
-                    <button style={{ background: "#fff", color: "#000" }}>Shop Collection</button>
-                  </div>
-                  <div className="desktop-grid-cards">
-                    <div className="desktop-card">
-                      <div className="desktop-card-img" />
-                      <b>Silk Overshirt</b>
-                      <small>$89.00 USD</small>
-                    </div>
-                    <div className="desktop-card">
-                      <div className="desktop-card-img" />
-                      <b>Chrono Watch</b>
-                      <small>$195.00 USD</small>
-                    </div>
-                    <div className="desktop-card">
-                      <div className="desktop-card-img" />
-                      <b>Canvas Bag</b>
-                      <small>$64.00 USD</small>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {code === "MIRROR-02" && (
-                <div className="desktop-fintech-layout">
-                  <div className="desktop-stat-bar">
-                    <div>
-                      <small>TOTAL BALANCE</small>
-                      <b>$48,290.50</b>
-                    </div>
-                    <div>
-                      <small>WEEKLY YIELD</small>
-                      <b style={{ color: "#37d39a" }}>+$2,450.00 (+4.8%)</b>
-                    </div>
-                    <div>
-                      <small>ACTIVE WALLETS</small>
-                      <b>6 Connected</b>
-                    </div>
-                  </div>
-                  <div className="desktop-tx-grid">
-                    <div className="desktop-tx-card">
-                      <b>Figma Enterprise</b>
-                      <small>Monthly Subscription</small>
-                      <span style={{ color: "#ff8593", fontSize: "11px" }}>-$45.00</span>
-                    </div>
-                    <div className="desktop-tx-card">
-                      <b>Client Wire Settlement</b>
-                      <small>International Payment</small>
-                      <span style={{ color: "#37d39a", fontSize: "11px" }}>+$8,400.00</span>
-                    </div>
-                    <div className="desktop-tx-card">
-                      <b>AWS Cloud Services</b>
-                      <small>Compute & Storage</small>
-                      <span style={{ color: "#ff8593", fontSize: "11px" }}>-$120.00</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {!["MIRROR-01", "MIRROR-02"].includes(code) && (
-                <div className="desktop-hero-layout">
-                  <div className="desktop-hero-banner" style={{ background: `linear-gradient(135deg, ${c}, #0a0d14)` }}>
-                    <small>CHALLENGE SPECIFICATION</small>
-                    <h2>{challenge?.title || "Replication Target"}</h2>
-                    <p>{challenge?.description || "Design and implement the desktop interface following high aesthetic standards."}</p>
-                  </div>
-                  <div className="desktop-grid-cards">
-                    <div className="desktop-card">
-                      <b>Hero & Navigation Header</b>
-                      <small>Layout & Typography</small>
-                    </div>
-                    <div className="desktop-card">
-                      <b>Component Hierarchy</b>
-                      <small>Visual Grid & Proportions</small>
-                    </div>
-                    <div className="desktop-card">
-                      <b>Responsive State & Theme</b>
-                      <small>Colors & Interactivity</small>
-                    </div>
-                  </div>
-                </div>
-              )}
+              <b style={{ color: "#d2d8e4", fontSize: "15px" }}>{challenge?.title || "No Image Uploaded"}</b>
+              <small style={{ fontSize: "12px", color: "#798396", marginTop: "4px" }}>Upload a challenge UI design screenshot in the Admin panel</small>
             </div>
           )}
         </div>
@@ -2544,14 +2329,16 @@ function Challenges({
         title="UI Templates & Topics"
         action={
           <div style={{ display: "flex", gap: "10px" }}>
-            <button
-              className="secondary"
-              onClick={() => setConfirmReset(true)}
-              style={{ fontSize: "12px" }}
-              title="Reset to default templates"
-            >
-              <RotateCcw size={14} /> Reset Defaults
-            </button>
+            {store.challenges.length > 0 && (
+              <button
+                className="secondary danger"
+                onClick={() => setConfirmReset(true)}
+                style={{ fontSize: "12px", borderColor: "rgba(255,91,110,0.3)", color: "#ff8593" }}
+                title="Clear all templates"
+              >
+                <Trash2 size={14} /> Clear All
+              </button>
+            )}
             <button
               className="primary"
               onClick={() => {
@@ -2595,89 +2382,117 @@ function Challenges({
         </div>
       </div>
 
-      <div className="challenge-admin-grid">
-        {store.challenges.map((c) => {
-          const assignedCount = store.participants.filter((p) => p.challenge === c.code).length;
-          return (
-            <div className="challenge-admin-card" key={c.code}>
-              {/* Hidden file input for fast 1-click upload */}
-              <input
-                type="file"
-                accept="image/*"
-                style={{ display: "none" }}
-                ref={(el) => {
-                  directUploadRef.current[c.code] = el;
-                }}
-                onChange={(e) => {
-                  if (e.target.files?.[0]) {
-                    handleDirectFileUpload(c.code, e.target.files[0]);
-                  }
-                }}
-              />
+      {store.challenges.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "50px 20px", background: "rgba(255,255,255,0.02)", borderRadius: "16px", border: "1px dashed #2a3346", margin: "20px 0" }}>
+          <div style={{ width: "56px", height: "56px", borderRadius: "16px", background: "rgba(115,87,255,0.12)", color: "#9c88ff", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
+            <Upload size={28} />
+          </div>
+          <h2 style={{ fontSize: "18px", color: "#e4e8f1", marginBottom: "6px" }}>No UI Templates Added Yet</h2>
+          <p style={{ color: "#798396", fontSize: "13px", maxWidth: "420px", margin: "0 auto 20px" }}>
+            Upload your challenge UI design screenshots with topic names. Participants will receive their assigned UI design during Round 1.
+          </p>
+          <button
+            className="primary"
+            onClick={() => {
+              setEditingChallenge({
+                code: "MIRROR-01",
+                title: "",
+                difficulty: "Medium",
+                color: "#7357ff",
+                description: "Recreate this interface.",
+                imageUrl: "",
+              });
+              setIsCreating(true);
+            }}
+          >
+            <Plus size={16} /> Add First UI Template
+          </button>
+        </div>
+      ) : (
+        <div className="challenge-admin-grid">
+          {store.challenges.map((c) => {
+            const assignedCount = store.participants.filter((p) => p.challenge === c.code).length;
+            return (
+              <div className="challenge-admin-card" key={c.code}>
+                {/* Hidden file input for fast 1-click upload */}
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  ref={(el) => {
+                    directUploadRef.current[c.code] = el;
+                  }}
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) {
+                      handleDirectFileUpload(c.code, e.target.files[0]);
+                    }
+                  }}
+                />
 
-              <div className="challenge-admin-preview">
-                <MockReference challenge={c} />
-              </div>
+                <div className="challenge-admin-preview">
+                  <MockReference challenge={c} />
+                </div>
 
-              <div className="challenge-admin-info">
-                <div className="challenge-admin-head">
-                  <div>
-                    <div style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "6px" }}>
-                      <Pill>{c.code}</Pill>
-                      {c.imageUrl ? (
-                        <Pill tone="green">UI IMAGE LOADED</Pill>
-                      ) : (
-                        <Pill tone="slate">VECTOR MOCKUP</Pill>
-                      )}
+                <div className="challenge-admin-info">
+                  <div className="challenge-admin-head">
+                    <div>
+                      <div style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "6px" }}>
+                        <Pill>{c.code}</Pill>
+                        {c.imageUrl ? (
+                          <Pill tone="green">UI IMAGE LOADED</Pill>
+                        ) : (
+                          <Pill tone="slate">NO IMAGE ATTACHED</Pill>
+                        )}
+                      </div>
+                      <h2>{c.title}</h2>
                     </div>
-                    <h2>{c.title}</h2>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#808b9e", margin: "6px 0 12px" }}>
+                    <span style={{ width: "9px", height: "9px", borderRadius: "50%", background: c.imageUrl ? "#00e5a3" : "#7357ff" }} />
+                    <b>{assignedCount} participants assigned</b>
+                  </div>
+
+                  <div className="challenge-actions">
+                    <button
+                      className="primary"
+                      onClick={() => directUploadRef.current[c.code]?.click()}
+                      title="Upload or replace design image from your computer"
+                    >
+                      <Upload size={13} /> {c.imageUrl ? "Replace UI" : "Upload UI"}
+                    </button>
+                    <button
+                      className="secondary"
+                      onClick={() => {
+                        setEditingChallenge(c);
+                        setIsCreating(false);
+                      }}
+                      title="Edit topic and UI template"
+                    >
+                      <Edit3 size={13} /> Edit
+                    </button>
+                    <button
+                      className="secondary"
+                      onClick={() => setInspectingChallenge(c)}
+                      title="Inspect challenge in full view"
+                    >
+                      <Eye size={13} /> Inspect
+                    </button>
+                    <button
+                      className="secondary danger"
+                      style={{ borderColor: "rgba(255,91,110,0.4)", color: "#ff8593", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                      onClick={() => setChallengeToDelete(c.code)}
+                      title={`Delete challenge ${c.code}`}
+                    >
+                      <Trash2 size={13} /> Delete
+                    </button>
                   </div>
                 </div>
-
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", color: "#808b9e", margin: "6px 0 12px" }}>
-                  <span style={{ width: "9px", height: "9px", borderRadius: "50%", background: c.imageUrl ? "#00e5a3" : "#7357ff" }} />
-                  <b>{assignedCount} participants assigned</b>
-                </div>
-
-                <div className="challenge-actions">
-                  <button
-                    className="primary"
-                    onClick={() => directUploadRef.current[c.code]?.click()}
-                    title="Upload or replace design image from your computer"
-                  >
-                    <Upload size={13} /> {c.imageUrl ? "Replace UI" : "Upload UI"}
-                  </button>
-                  <button
-                    className="secondary"
-                    onClick={() => {
-                      setEditingChallenge(c);
-                      setIsCreating(false);
-                    }}
-                    title="Edit topic and UI template"
-                  >
-                    <Edit3 size={13} /> Edit
-                  </button>
-                  <button
-                    className="secondary"
-                    onClick={() => setInspectingChallenge(c)}
-                    title="Inspect challenge in full view"
-                  >
-                    <Eye size={13} /> Inspect
-                  </button>
-                  <button
-                    className="secondary danger"
-                    style={{ borderColor: "rgba(255,91,110,0.4)", color: "#ff8593", display: "inline-flex", alignItems: "center", gap: "5px" }}
-                    onClick={() => setChallengeToDelete(c.code)}
-                    title={`Delete challenge ${c.code}`}
-                  >
-                    <Trash2 size={13} /> Delete
-                  </button>
-                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Challenge Edit & Upload Modal */}
       {editingChallenge && (
@@ -2747,11 +2562,11 @@ function Challenges({
       {/* Reset Confirmation Modal */}
       {confirmReset && (
         <Confirm
-          title="Reset all challenges?"
-          text="This will revert all Round 1 challenges to the default built-in presets (Commerce, Fintech, Travel, Food)."
+          title="Clear all UI templates?"
+          text="This will remove all current UI templates. You can then add and upload your custom challenge templates from scratch."
           cancel={() => setConfirmReset(false)}
           action={handleResetChallenges}
-          label="RESET CHALLENGES"
+          label="CLEAR ALL TEMPLATES"
         />
       )}
     </>
