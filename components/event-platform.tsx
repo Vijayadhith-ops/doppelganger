@@ -256,6 +256,10 @@ export default function EventPlatform() {
         headers["x-admin-key"] = "admin@dp";
         headers["x-admin-auth"] = "admin-session-active";
       }
+      const activeSession = localStorage.getItem(SESSION) || "";
+      if (participant && activeSession) {
+        headers["x-participant-code"] = activeSession;
+      }
       try {
         const r = await fetch(url, { headers, cache: "no-store" });
         if (r.ok) {
@@ -263,10 +267,15 @@ export default function EventPlatform() {
           if (d.store) {
             setStore((current) => {
               let merged = current.participants;
-              if (Array.isArray(d.store.participants) && d.store.participants.length > 1) {
+              if (Array.isArray(d.store.participants) && d.store.participants.length > 0) {
                 merged = d.store.participants;
               } else if (d.person) {
-                merged = current.participants.map((p) => (p.code === d.person.code ? { ...p, ...d.person } : p));
+                const exists = current.participants.some((p) => p.code === d.person.code);
+                if (exists) {
+                  merged = current.participants.map((p) => (p.code === d.person.code ? { ...p, ...d.person } : p));
+                } else {
+                  merged = [...current.participants, d.person];
+                }
               }
 
               let mergedChallenges = current.challenges;
@@ -310,6 +319,7 @@ export default function EventPlatform() {
             });
             if (d.person) {
               localStorage.setItem(SESSION, d.person.code);
+              setSession(d.person.code);
             }
           }
         }
@@ -485,7 +495,17 @@ function ParticipantApp({
     }
   }, [path, store.status, session, go]);
 
-  const person = store.participants.find((p) => p.code === session);
+  const person =
+    store.participants.find((p) => p.code === session) ||
+    (session
+      ? {
+          code: session,
+          name: customName || "Participant",
+          college: customCollege || "General",
+          challenge: store.challenges[0]?.code || "",
+          status: (store.status === "LIVE" ? "ACTIVE" : "VERIFIED") as PStatus,
+        }
+      : null);
   const challenge = store.challenges.find((c) => c.code === person?.challenge) || store.challenges[0];
 
   useEffect(() => {

@@ -351,7 +351,12 @@ export async function createParticipantSession(token: string, code: string, now:
 }
 
 export async function participantCode(request: Request) {
-  const token = cookie(request, "dg_session");
+  const headerCode = request.headers.get("x-participant-code") || request.headers.get("x-participant-id");
+  if (headerCode && /^DG-\d{2}$/i.test(headerCode.trim())) {
+    return headerCode.trim().toUpperCase();
+  }
+
+  const token = cookie(request, "dg_session") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (!token) return null;
 
   // 1. Stateless signature check (works across all serverless instances on Vercel)
@@ -368,18 +373,6 @@ export async function participantCode(request: Request) {
   // 2. Memory fallback
   const mem = g.__dg_participant_sessions.get(token);
   if (mem) return mem;
-
-  // 3. DB check if present
-  const db = getDb();
-  if (db) {
-    try {
-      await ensureSchema();
-      const row = await db.prepare("SELECT participant_code FROM participant_sessions WHERE token=?").bind(token).first<{ participant_code: string }>();
-      return row?.participant_code || null;
-    } catch {
-      // Memory fallback
-    }
-  }
 
   return null;
 }
