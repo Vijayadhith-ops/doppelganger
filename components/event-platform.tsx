@@ -91,28 +91,12 @@ type Store = {
 
 const challenges: Challenge[] = [];
 
-const names = [
-  "Aarav", "Aisha", "Akash", "Ananya", "Arjun", "Deepa", "Gokul", "Harini", "Ishaan", "Janani",
-  "Kavin", "Keerthi", "Madhan", "Nila", "Pranav", "Rithika", "Sanjay", "Swetha", "Vijay", "Yamini",
-  "Abishek", "Bhavana", "Charan", "Divya", "Ezhil", "Farhan", "Gayathri", "Hemant", "Induja", "Jeeva",
-  "Karthik", "Lavanya", "Manoj", "Naveen", "Oviya", "Praveen", "Rakshana", "Saravanan", "Tharani", "Udhay",
-  "Varun", "Vignesh", "Yazhini", "Zeenath", "Aditya"
-];
-const makeParticipants = (): Participant[] =>
-  Array.from({ length: 45 }, (_, i) => ({
-    code: `DG-${String(i + 1).padStart(2, "0")}`,
-    name: names[i % names.length],
-    college: i % 3 === 0 ? "K.L.N. College of Engineering" : "Guest Institution",
-    challenge: "",
-    status: "REGISTERED",
-  }));
-
 const initial: Store = {
   status: "WAITING",
   duration: 1800,
   endsAt: null,
   pausedRemaining: 1800,
-  participants: makeParticipants(),
+  participants: [],
   challenges: [],
   grace: 30,
 };
@@ -148,15 +132,13 @@ const safeLoad = (): Store => {
       return { ...initial, challenges: loadedChallenges };
     }
     const parsed = JSON.parse(saved);
-    let participants = Array.isArray(parsed.participants) && parsed.participants.length ? parsed.participants : initial.participants;
-    if (participants.length < initial.participants.length) {
-      const existing = new Set(participants.map((p: Participant) => p.code));
-      for (const p of initial.participants) {
-        if (!existing.has(p.code)) {
-          participants.push(p);
-        }
-      }
-      participants.sort((a: Participant, b: Participant) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+    let participants: Participant[] = [];
+    if (Array.isArray(parsed.participants)) {
+      participants = parsed.participants.filter((p: Participant) => {
+        const isDefaultMock = (p.college === "K.L.N. College of Engineering" || p.college === "Guest Institution") &&
+          p.status === "REGISTERED" && !p.verifiedAt && !p.submittedAt && !p.submissionImage && !p.prompt;
+        return !isDefaultMock;
+      });
     }
 
     return {
@@ -1539,7 +1521,7 @@ function Admin({
             </div>
           )}
           {path === "/admin/badges" ? (
-            <BadgeCenter store={store} />
+            <BadgeCenter store={store} setStore={persist} />
           ) : path === "/admin/participants" ? (
             <Participants store={store} setStore={persist} search={search} setSearch={setSearch} />
           ) : path === "/admin/challenges" ? (
@@ -1586,8 +1568,8 @@ function PageTitle({ eyebrow, title, action }: { eyebrow: string; title: string;
   );
 }
 
-function BadgeCenter({ store }: { store: Store }) {
-  const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:5173";
+function BadgeCenter({ store, setStore }: { store: Store; setStore?: (s: Store) => void }) {
+  const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
   const masterUrl = `${origin}/join`;
   const [copied, setCopied] = useState(false);
 
@@ -1597,29 +1579,56 @@ function BadgeCenter({ store }: { store: Store }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const generateSlots = async (count: number = 20) => {
+    const nextList: Participant[] = Array.from({ length: count }, (_, i) => ({
+      code: `DG-${String(i + 1).padStart(2, "0")}`,
+      name: `Participant ${i + 1}`,
+      college: "Participant",
+      challenge: store.challenges.length > 0 ? store.challenges[i % store.challenges.length].code : "",
+      status: "REGISTERED",
+    }));
+    if (setStore) setStore({ ...store, participants: nextList });
+    try {
+      await fetch("/api/admin/state", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-admin-key": "admin@dp", "x-admin-auth": "admin-session-active" },
+        body: JSON.stringify({ type: "generate-participants", count }),
+      });
+    } catch {}
+  };
+
   return (
     <>
       <PageTitle
         eyebrow="EVENT CREDENTIALS"
         title="Master QR & Participant Badges"
         action={
-          <button className="primary btn-hide-print" onClick={() => window.print()}>
-            <Printer size={16} /> Print Badge Sheet
-          </button>
+          <div style={{ display: "flex", gap: "10px" }}>
+            {store.participants.length > 0 && (
+              <button className="primary btn-hide-print" onClick={() => window.print()}>
+                <Printer size={16} /> Print Badge Sheet
+              </button>
+            )}
+            {store.participants.length === 0 && (
+              <button className="secondary btn-hide-print" onClick={() => generateSlots(20)}>
+                <Sparkles size={15} /> Generate 20 Badges (DG-01 to DG-20)
+              </button>
+            )}
+          </div>
         }
       />
 
       <div className="master-qr-hero">
-        <div className="qr-box">
-          <QRCodeSVG value={masterUrl} size={150} fgColor="#090d14" bgColor="#ffffff" />
+        <div className="qr-box" style={{ background: "#ffffff", padding: "12px", borderRadius: "14px", display: "inline-grid", placeItems: "center" }}>
+          <QRCodeSVG value={masterUrl} size={160} fgColor="#090d14" bgColor="#ffffff" />
         </div>
         <div>
           <Pill tone="green">MASTER EVENT QR</Pill>
           <h2>Hall Check-In & Auto-Assignment QR</h2>
           <p>
-            Display this on the auditorium projector or entrance posters. Students scan this with their phone to instantly auto-claim an available participant badge ID and enter the round.
+            Display this on the auditorium projector or entrance posters. Students scan this with their mobile camera to instantly auto-claim an available participant badge ID and enter the round.
           </p>
-          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap", marginTop: "12px" }}>
             <span className="url-pill">{masterUrl}</span>
             <button className="secondary btn-hide-print" onClick={copyLink} style={{ minHeight: "36px", padding: "0 12px", fontSize: "11px" }}>
               {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? "Copied" : "Copy Join Link"}
@@ -1628,35 +1637,48 @@ function BadgeCenter({ store }: { store: Store }) {
         </div>
       </div>
 
-      <div className="toolbar btn-hide-print">
+      <div className="toolbar btn-hide-print" style={{ marginTop: "24px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <b>Individual Badges</b>
           <span style={{ color: "#7a8497", fontSize: "12px" }}>({store.participants.length} Registered Cards)</span>
         </div>
-        <Pill tone="slate">READY FOR PRINT</Pill>
+        {store.participants.length > 0 && <Pill tone="slate">READY FOR PRINT</Pill>}
       </div>
 
-      <div className="badge-grid">
-        {store.participants.map((p) => {
-          const directUrl = `${origin}/verify?id=${p.code}`;
-          return (
-            <div className="badge-card" key={p.code}>
-              <div className="badge-top">
-                <Pill tone={p.status === "SUBMITTED" ? "green" : p.status === "ACTIVE" ? "blue" : "violet"}>
-                  {p.challenge}
-                </Pill>
-                <small style={{ color: "#6e798d", fontSize: "9px" }}>ROUND 01</small>
+      {store.participants.length === 0 ? (
+        <div className="panel" style={{ padding: "40px 20px", textAlign: "center", color: "#828ea2" }}>
+          <Users size={36} style={{ color: "#7557ff", margin: "0 auto 12px", opacity: 0.7 }} />
+          <h3 style={{ color: "#e2e8f0", fontSize: "16px", marginBottom: "6px" }}>No Individual Badges Created Yet</h3>
+          <p style={{ fontSize: "13px", maxWidth: "460px", margin: "0 auto 16px", color: "#718096" }}>
+            Participants can scan the Master QR above to join dynamically, or you can generate ID slots (DG-01 to DG-20) to print physical badge sheets.
+          </p>
+          <button className="primary" onClick={() => generateSlots(20)} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+            <Sparkles size={15} /> Generate 20 Badge Slots
+          </button>
+        </div>
+      ) : (
+        <div className="badge-grid">
+          {store.participants.map((p) => {
+            const directUrl = `${origin}/verify?id=${p.code}`;
+            return (
+              <div className="badge-card" key={p.code}>
+                <div className="badge-top">
+                  <Pill tone={p.status === "SUBMITTED" ? "green" : p.status === "ACTIVE" ? "blue" : "violet"}>
+                    {p.challenge || "ROOKIE"}
+                  </Pill>
+                  <small style={{ color: "#6e798d", fontSize: "9px" }}>ROUND 01</small>
+                </div>
+                <h3>{p.code}</h3>
+                <span>{p.name || "Participant"}</span>
+                <div className="badge-qr" style={{ background: "#ffffff", padding: "8px", borderRadius: "10px", margin: "10px auto", display: "inline-grid", placeItems: "center" }}>
+                  <QRCodeSVG value={directUrl} size={110} fgColor="#05070a" bgColor="#ffffff" />
+                </div>
+                <small className="badge-foot">Scan to Login Directly</small>
               </div>
-              <h3>{p.code}</h3>
-              <span>{p.name || "Participant"}</span>
-              <div className="badge-qr">
-                <QRCodeSVG value={directUrl} size={110} fgColor="#05070a" bgColor="#ffffff" />
-              </div>
-              <small className="badge-foot">Scan to Login Directly</small>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </>
   );
 }
@@ -1784,8 +1806,26 @@ function Stat({ icon: I, label, value, detail }: { icon: any; label: string; val
   );
 }
 
-function ParticipantTable({ participants }: { participants: Participant[] }) {
+function ParticipantTable({
+  participants,
+  onDelete,
+}: {
+  participants: Participant[];
+  onDelete?: (code: string) => void;
+}) {
   const [selectedSub, setSelectedSub] = useState<Participant | null>(null);
+
+  if (participants.length === 0) {
+    return (
+      <div style={{ padding: "48px 20px", textAlign: "center", color: "#798499" }}>
+        <Users size={32} style={{ color: "#7557ff", margin: "0 auto 10px", opacity: 0.8 }} />
+        <h3 style={{ color: "#e4e8f1", fontSize: "15px", marginBottom: "4px" }}>No Participants Found</h3>
+        <p style={{ fontSize: "12px", color: "#687387", margin: 0 }}>
+          Participants will appear here when they scan the Master QR or check in.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -1798,6 +1838,7 @@ function ParticipantTable({ participants }: { participants: Participant[] }) {
               <th>STATUS</th>
               <th>VERIFIED</th>
               <th>SUBMISSION (PROMPT & IMAGE)</th>
+              {onDelete && <th style={{ width: "50px", textAlign: "center" }}>ACTION</th>}
             </tr>
           </thead>
           <tbody>
@@ -1809,7 +1850,7 @@ function ParticipantTable({ participants }: { participants: Participant[] }) {
                     {p.name} ({p.college})
                   </span>
                 </td>
-                <td>{p.challenge}</td>
+                <td>{p.challenge || "—"}</td>
                 <td>
                   <Pill
                     tone={
@@ -1849,6 +1890,19 @@ function ParticipantTable({ participants }: { participants: Participant[] }) {
                     <span style={{ color: "#687285", fontSize: "11px" }}>Pending</span>
                   )}
                 </td>
+                {onDelete && (
+                  <td style={{ textAlign: "center" }}>
+                    <button
+                      type="button"
+                      className="iconbtn"
+                      style={{ color: "#ff6b6b", padding: "4px 8px" }}
+                      title={`Remove ${p.code}`}
+                      onClick={() => onDelete(p.code)}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -1952,34 +2006,93 @@ function Participants({
   const list = store.participants.filter((p) =>
     (p.code + p.name + p.college + p.challenge).toLowerCase().includes(search.toLowerCase())
   );
+
+  const handleDelete = async (code: string) => {
+    const nextList = store.participants.filter((p) => p.code !== code);
+    setStore({ ...store, participants: nextList });
+    try {
+      await fetch("/api/admin/state", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-admin-key": "admin@dp", "x-admin-auth": "admin-session-active" },
+        body: JSON.stringify({ type: "delete-participant", code }),
+      });
+    } catch {}
+  };
+
+  const handleClearAll = async () => {
+    if (!window.confirm("Are you sure you want to clear all participants?")) return;
+    setStore({ ...store, participants: [] });
+    try {
+      await fetch("/api/admin/state", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-admin-key": "admin@dp", "x-admin-auth": "admin-session-active" },
+        body: JSON.stringify({ type: "clear-participants" }),
+      });
+    } catch {}
+  };
+
+  const handleAddSlot = async () => {
+    const nextNum = store.participants.length + 1;
+    const nextCode = `DG-${String(nextNum).padStart(2, "0")}`;
+    const ch = store.challenges.length > 0 ? store.challenges[(nextNum - 1) % store.challenges.length].code : "";
+    const newP: Participant = {
+      code: nextCode,
+      name: `Participant ${nextNum}`,
+      college: "Participant",
+      challenge: ch,
+      status: "REGISTERED",
+    };
+    setStore({ ...store, participants: [...store.participants, newP] });
+    try {
+      await fetch("/api/admin/state", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-admin-key": "admin@dp", "x-admin-auth": "admin-session-active" },
+        body: JSON.stringify({ type: "add-participant", participant: newP }),
+      });
+    } catch {}
+  };
+
+  const handleGenerateSlots = async (count: number = 20) => {
+    const nextList: Participant[] = Array.from({ length: count }, (_, i) => ({
+      code: `DG-${String(i + 1).padStart(2, "0")}`,
+      name: `Participant ${i + 1}`,
+      college: "Participant",
+      challenge: store.challenges.length > 0 ? store.challenges[i % store.challenges.length].code : "",
+      status: "REGISTERED",
+    }));
+    setStore({ ...store, participants: nextList });
+    try {
+      await fetch("/api/admin/state", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-admin-key": "admin@dp", "x-admin-auth": "admin-session-active" },
+        body: JSON.stringify({ type: "generate-participants", count }),
+      });
+    } catch {}
+  };
+
   return (
     <>
       <PageTitle
         eyebrow="EVENT ROSTER"
         title="Participants"
         action={
-          <button
-            className="primary"
-            onClick={() => {
-              const i = store.participants.length + 1;
-              const ch = store.challenges[(i - 1) % store.challenges.length]?.code || "MIRROR-01";
-              setStore({
-                ...store,
-                participants: [
-                  ...store.participants,
-                  {
-                    code: `DG-${String(i).padStart(2, "0")}`,
-                    name: `Participant ${i}`,
-                    college: "K.L.N. College",
-                    challenge: ch,
-                    status: "REGISTERED",
-                  },
-                ],
-              });
-            }}
-          >
-            + Add participant
-          </button>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+            <button className="primary" onClick={handleAddSlot}>
+              + Add participant slot
+            </button>
+            <button className="secondary" onClick={() => handleGenerateSlots(20)}>
+              <Sparkles size={14} /> Generate 20 Slots
+            </button>
+            {store.participants.length > 0 && (
+              <button
+                className="secondary"
+                style={{ color: "#ff6b6b", borderColor: "#552828" }}
+                onClick={handleClearAll}
+              >
+                <Trash2 size={14} /> Clear All
+              </button>
+            )}
+          </div>
         }
       />
       <div className="toolbar">
@@ -1994,7 +2107,7 @@ function Participants({
         <Pill tone="slate">{list.length} RECORDS</Pill>
       </div>
       <div className="panel">
-        <ParticipantTable participants={list} />
+        <ParticipantTable participants={list} onDelete={handleDelete} />
       </div>
     </>
   );
