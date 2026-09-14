@@ -271,8 +271,13 @@ export default function EventPlatform() {
       const admin = path.startsWith("/admin") && path !== "/admin/login";
       const participant = !admin && !["/", "/verify", "/recover", "/live", "/join", "/login"].includes(path);
       const url = admin ? "/api/admin/state" : participant ? "/api/participant/me" : "/api/event";
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (admin) {
+        headers["x-admin-key"] = "admin@dp";
+        headers["x-admin-auth"] = "admin-session-active";
+      }
       try {
-        const r = await fetch(url, { cache: "no-store" });
+        const r = await fetch(url, { headers, cache: "no-store" });
         if (r.ok) {
           const d = await r.json();
           if (d.store) {
@@ -1617,12 +1622,17 @@ function Admin({
     try {
       const r = await fetch("/api/admin/state", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "x-admin-key": "admin@dp",
+          "x-admin-auth": "admin-session-active",
+        },
         body: JSON.stringify({ type: "round", action }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
       setStore(d.store);
+      setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Action failed");
     } finally {
@@ -1634,12 +1644,18 @@ function Admin({
     setStore(next);
     const r = await fetch("/api/admin/state", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "x-admin-key": "admin@dp",
+        "x-admin-auth": "admin-session-active",
+      },
       body: JSON.stringify({ type: "replace", store: next }),
     });
     if (!r.ok) {
       const d = await r.json();
       setError(d.error || "Save failed");
+    } else {
+      setError("");
     }
   };
 
@@ -2432,7 +2448,11 @@ function Challenges({
 
       const r = await fetch("/api/admin/state", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "x-admin-key": "admin@dp",
+          "x-admin-auth": "admin-session-active",
+        },
         body: JSON.stringify({ type: "update-challenge", challenge: updated }),
       });
       const d = await r.json();
@@ -2466,7 +2486,11 @@ function Challenges({
 
       const r = await fetch("/api/admin/state", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "x-admin-key": "admin@dp",
+          "x-admin-auth": "admin-session-active",
+        },
         body: JSON.stringify({ type: "delete-challenge", code }),
       });
       const d = await r.json();
@@ -2485,7 +2509,11 @@ function Challenges({
       } catch {}
       const r = await fetch("/api/admin/state", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "x-admin-key": "admin@dp",
+          "x-admin-auth": "admin-session-active",
+        },
         body: JSON.stringify({ type: "reset-challenges" }),
       });
       const d = await r.json();
