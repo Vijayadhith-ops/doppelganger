@@ -1303,7 +1303,7 @@ function Admin({
   path: string;
 }) {
   const [logged, setLogged] = useState(() => typeof window !== "undefined" && sessionStorage.getItem("dg-admin") === "yes");
-  const [adminUser, setAdminUser] = useState("admin");
+  const [adminUser, setAdminUser] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [confirm, setConfirm] = useState<string | null>(null);
@@ -1325,7 +1325,7 @@ function Admin({
       setError("");
       go("/admin");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Login failed. Use admin / admin@dp");
+      setError(e instanceof Error ? e.message : "Invalid credentials. Please check your username and password.");
     }
   };
 
@@ -1353,11 +1353,11 @@ function Admin({
             <h2>Admin Control Center</h2>
             <p>Authorized event organizers and staff only</p>
             
-            <label>ADMIN USERNAME / NAME</label>
+            <label>ADMIN USERNAME</label>
             <input
               className="field"
               value={adminUser}
-              placeholder="admin"
+              placeholder="Enter username"
               onChange={(e) => {
                 setAdminUser(e.target.value);
                 setError("");
@@ -1370,17 +1370,13 @@ function Admin({
               className="field"
               type="password"
               value={password}
-              placeholder="admin@dp"
+              placeholder="Enter password"
               onChange={(e) => {
                 setPassword(e.target.value);
                 setError("");
               }}
               onKeyDown={(e) => e.key === "Enter" && handleAdminLogin()}
             />
-
-            <small style={{ display: "block", color: "#687184", marginBottom: "12px", fontSize: "11px" }}>
-              Default credentials: Name: <code style={{ color: "#00e5a3" }}>admin</code> · Password: <code style={{ color: "#70aaff" }}>admin@dp</code>
-            </small>
 
             {error && (
               <div className="form-error">
@@ -1390,6 +1386,7 @@ function Admin({
             <button
               className="primary wide"
               onClick={handleAdminLogin}
+              style={{ marginTop: "12px" }}
             >
               LOGIN TO ADMIN DASHBOARD <ChevronRight />
             </button>

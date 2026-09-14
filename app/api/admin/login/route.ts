@@ -8,13 +8,13 @@ export async function POST(request: Request) {
   const providedUser = String(body.username || body.name || body.email || "").trim().toLowerCase();
   const providedPass = String(body.password || "");
 
-  // Require username 'admin' (or allow empty if password is valid) and password 'admin@dp'
+  // Require username 'admin' (or allow empty if password is valid)
   if (providedUser && providedUser !== "admin" && providedUser !== "admin@dp" && providedUser !== "admin@klnce.edu") {
-    return Response.json({ error: "Invalid admin username. Use 'admin'" }, { status: 401 });
+    return Response.json({ error: "Invalid admin username." }, { status: 401 });
   }
 
   if (!providedPass || (providedPass !== expectedPass && providedPass !== "admin@dp" && providedPass !== "admin123")) {
-    return Response.json({ error: "Invalid admin password. Use 'admin@dp'" }, { status: 401 });
+    return Response.json({ error: "Invalid admin password." }, { status: 401 });
   }
 
   const now = new Date();
