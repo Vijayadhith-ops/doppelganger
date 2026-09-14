@@ -74,6 +74,9 @@ type Challenge = {
   difficulty: string;
   color: string;
   description: string;
+  imageUrl?: string;
+  specs?: string[];
+  category?: string;
 };
 type Store = {
   status: RoundStatus;
@@ -119,11 +122,19 @@ const initial: Store = {
   grace: 30,
 };
 
-const STORE = "dg-event-v1", SESSION = "dg-participant-v1";
+const STORE = "dg-event-v1", SESSION = "dg-participant-v1", CHALLENGES_STORAGE = "dg-challenges-v1";
 const safeLoad = (): Store => {
   try {
     const saved = localStorage.getItem(STORE);
-    if (!saved) return initial;
+    const savedChallenges = localStorage.getItem(CHALLENGES_STORAGE);
+    const parsedChallenges: Challenge[] | null = savedChallenges ? JSON.parse(savedChallenges) : null;
+
+    if (!saved) {
+      if (Array.isArray(parsedChallenges) && parsedChallenges.length > 0) {
+        return { ...initial, challenges: parsedChallenges };
+      }
+      return initial;
+    }
     const parsed = JSON.parse(saved);
     let participants = Array.isArray(parsed.participants) && parsed.participants.length ? parsed.participants : initial.participants;
     if (participants.length < initial.participants.length) {
@@ -135,11 +146,26 @@ const safeLoad = (): Store => {
       }
       participants.sort((a: Participant, b: Participant) => a.code.localeCompare(b.code, undefined, { numeric: true }));
     }
+
+    let loadedChallenges = Array.isArray(parsed.challenges) && parsed.challenges.length ? parsed.challenges : initial.challenges;
+    if (Array.isArray(parsedChallenges) && parsedChallenges.length > 0) {
+      const pMap = new Map(parsedChallenges.map((c: Challenge) => [c.code, c]));
+      loadedChallenges = loadedChallenges.map((c: Challenge) => {
+        const fromStorage = pMap.get(c.code);
+        return fromStorage ? { ...c, ...fromStorage, imageUrl: fromStorage.imageUrl || c.imageUrl || "" } : c;
+      });
+      for (const ch of parsedChallenges) {
+        if (!loadedChallenges.some((c: Challenge) => c.code === ch.code)) {
+          loadedChallenges.push(ch);
+        }
+      }
+    }
+
     return {
       ...initial,
       ...parsed,
       participants,
-      challenges: Array.isArray(parsed.challenges) && parsed.challenges.length ? parsed.challenges : initial.challenges
+      challenges: loadedChallenges
     };
   } catch {
     return initial;
@@ -257,12 +283,45 @@ export default function EventPlatform() {
               } else if (d.person) {
                 merged = current.participants.map((p) => (p.code === d.person.code ? { ...p, ...d.person } : p));
               }
-              return {
+
+              let mergedChallenges = current.challenges;
+              if (Array.isArray(d.store.challenges) && d.store.challenges.length > 0) {
+                const localMap = new Map(current.challenges.map((c) => [c.code, c]));
+                const remoteMap = new Map(d.store.challenges.map((c) => [c.code, c]));
+                const allCodes = Array.from(new Set([...current.challenges.map((c) => c.code), ...d.store.challenges.map((c) => c.code)]));
+
+                mergedChallenges = allCodes.map((code) => {
+                  const local = localMap.get(code);
+                  const remote = remoteMap.get(code);
+                  if (local && remote) {
+                    return {
+                      ...remote,
+                      imageUrl: remote.imageUrl || local.imageUrl || "",
+                      title: (remote.title && remote.title !== "Commerce Mobile" && remote.title !== "Fintech Dashboard" && remote.title !== "Travel Discovery" && remote.title !== "Food Delivery") ? remote.title : (local.title || remote.title),
+                      description: remote.description || local.description,
+                      difficulty: remote.difficulty || local.difficulty,
+                      color: remote.color || local.color,
+                      specs: remote.specs || local.specs,
+                      category: remote.category || local.category,
+                    };
+                  }
+                  return remote || local!;
+                });
+              }
+
+              const nextState: Store = {
                 ...current,
                 ...d.store,
                 participants: merged,
-                challenges: d.store.challenges?.length ? d.store.challenges : current.challenges,
+                challenges: mergedChallenges,
               };
+
+              try {
+                localStorage.setItem(STORE, JSON.stringify(nextState));
+                localStorage.setItem(CHALLENGES_STORAGE, JSON.stringify(mergedChallenges));
+              } catch {}
+
+              return nextState;
             });
             if (d.person) {
               localStorage.setItem(SESSION, d.person.code);
@@ -277,7 +336,14 @@ export default function EventPlatform() {
   }, [ready, path]);
 
   useEffect(() => {
-    if (ready) localStorage.setItem(STORE, JSON.stringify(store));
+    if (ready) {
+      try {
+        localStorage.setItem(STORE, JSON.stringify(store));
+        if (store.challenges?.length) {
+          localStorage.setItem(CHALLENGES_STORAGE, JSON.stringify(store.challenges));
+        }
+      } catch {}
+    }
   }, [store, ready]);
 
   const go = (p: string) => {
@@ -2352,6 +2418,18 @@ function Challenges({
 
   const handleSaveChallenge = async (updated: Challenge) => {
     try {
+      setStore((prev) => {
+        const nextChallenges = prev.challenges.some((c) => c.code === updated.code)
+          ? prev.challenges.map((c) => (c.code === updated.code ? updated : c))
+          : [...prev.challenges, updated];
+        const nextStore = { ...prev, challenges: nextChallenges };
+        try {
+          localStorage.setItem(CHALLENGES_STORAGE, JSON.stringify(nextChallenges));
+          localStorage.setItem(STORE, JSON.stringify(nextStore));
+        } catch {}
+        return nextStore;
+      });
+
       const r = await fetch("/api/admin/state", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -2359,7 +2437,13 @@ function Challenges({
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
-      if (d.store) setStore(d.store);
+      if (d.store) {
+        setStore((prev) => ({
+          ...prev,
+          ...d.store,
+          challenges: prev.challenges.map((c) => (c.code === updated.code ? updated : c)),
+        }));
+      }
       showToast(`Challenge ${updated.code} (${updated.title}) saved successfully.`);
     } catch (e) {
       alert(e instanceof Error ? e.message : "Failed to update challenge");
@@ -2368,6 +2452,18 @@ function Challenges({
 
   const handleDeleteChallenge = async (code: string) => {
     try {
+      setStore((prev) => {
+        const nextChallenges = prev.challenges.filter((c) => c.code !== code);
+        const fallback = nextChallenges[0]?.code || "MIRROR-01";
+        const nextParticipants = prev.participants.map((p) => (p.challenge === code ? { ...p, challenge: fallback } : p));
+        const nextStore = { ...prev, challenges: nextChallenges, participants: nextParticipants };
+        try {
+          localStorage.setItem(CHALLENGES_STORAGE, JSON.stringify(nextChallenges));
+          localStorage.setItem(STORE, JSON.stringify(nextStore));
+        } catch {}
+        return nextStore;
+      });
+
       const r = await fetch("/api/admin/state", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -2384,6 +2480,9 @@ function Challenges({
 
   const handleResetChallenges = async () => {
     try {
+      try {
+        localStorage.removeItem(CHALLENGES_STORAGE);
+      } catch {}
       const r = await fetch("/api/admin/state", {
         method: "POST",
         headers: { "content-type": "application/json" },
