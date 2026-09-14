@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment, @typescript-eslint/no-explicit-any */
 // @ts-nocheck
 import { seed, type EventStore } from "./event-seed";
-import { getSupabase } from "./supabase";
+import { getSupabase, getSql } from "./supabase";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -123,6 +123,24 @@ export async function ensureSchema() {
 }
 
 export async function readStore(): Promise<EventStore> {
+  const sql = getSql();
+  if (sql) {
+    try {
+      await sql`CREATE TABLE IF NOT EXISTS doppelganger_state (id TEXT PRIMARY KEY, store JSONB NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW())`;
+      const rows = await sql`SELECT store FROM doppelganger_state WHERE id = 'round_01'`;
+      if (rows && rows.length > 0 && rows[0].store) {
+        g.__dg_store = rows[0].store;
+        return rows[0].store as EventStore;
+      }
+      const initial = seed();
+      await sql`INSERT INTO doppelganger_state (id, store) VALUES ('round_01', ${sql.json(initial)}) ON CONFLICT (id) DO NOTHING`;
+      g.__dg_store = initial;
+      return initial;
+    } catch (e) {
+      console.warn("SQL connection read fallback:", e);
+    }
+  }
+
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -175,6 +193,20 @@ export async function readStore(): Promise<EventStore> {
 export async function writeStore(value: EventStore) {
   g.__dg_store = value;
   writeTmpStore(value);
+
+  const sql = getSql();
+  if (sql) {
+    try {
+      await sql`
+        INSERT INTO doppelganger_state (id, store, updated_at)
+        VALUES ('round_01', ${sql.json(value)}, NOW())
+        ON CONFLICT (id) DO UPDATE
+        SET store = EXCLUDED.store, updated_at = EXCLUDED.updated_at
+      `;
+    } catch (e) {
+      console.warn("SQL write fallback:", e);
+    }
+  }
 
   const supabase = getSupabase();
   if (supabase) {
