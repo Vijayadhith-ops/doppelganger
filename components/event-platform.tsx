@@ -421,29 +421,42 @@ function ParticipantApp({
   const subFileInputRef = useRef<HTMLInputElement>(null);
   const remaining = useClock(store);
 
-  const verifyDirect = useCallback(async (id: string, name?: string, college?: string) => {
+  const [registering, setRegistering] = useState(false);
+
+  const verifyDirect = useCallback(async (id?: string, name?: string, college?: string) => {
     try {
+      setRegistering(true);
+      setError("");
       const r = await fetch("/api/participant/verify", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code: id, name, college }),
+        body: JSON.stringify({ code: id || undefined, name, college }),
       });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.error);
-      localStorage.setItem(SESSION, id);
-      setSession(id);
-      setStore((prev) => ({
-        ...prev,
-        ...d.store,
-        participants: prev.participants.map((p) =>
-          p.code === id ? { ...p, status: "VERIFIED", ...(name ? { name } : {}), ...(college ? { college } : {}), ...d.person } : p
-        ),
-      }));
+      if (!r.ok) throw new Error(d.error || "Verification failed");
+      const assignedCode = d.person?.code || id;
+      if (assignedCode) {
+        localStorage.setItem(SESSION, assignedCode);
+        setSession(assignedCode);
+      }
+      setStore((prev) => {
+        const existingIdx = prev.participants.findIndex((p) => p.code === assignedCode);
+        const updatedList = existingIdx >= 0
+          ? prev.participants.map((p) => (p.code === assignedCode ? { ...p, ...d.person } : p))
+          : [...prev.participants, d.person];
+        return {
+          ...prev,
+          ...d.store,
+          participants: updatedList,
+        };
+      });
       go(d.status === "LIVE" ? "/challenge" : "/waiting");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Verification failed. Try again.");
+    } finally {
+      setRegistering(false);
     }
-  }, [go]);
+  }, [go, setStore]);
 
   // Check URL query params for auto-verification on load (e.g. ?id=DG-01 or ?code=DG-01)
   useEffect(() => {
@@ -619,12 +632,17 @@ function ParticipantApp({
 
   // Participant Login & Master QR Self Check-In Page (/login or /join)
   if (path === "/join" || path === "/login") {
-    const sortedParticipants = [...store.participants].sort((a, b) =>
-      a.code.localeCompare(b.code, undefined, { numeric: true })
-    );
-    const availableSlots = sortedParticipants.filter((p) => p.status === "REGISTERED");
-    const firstAvailable = availableSlots[0]?.code || sortedParticipants[0]?.code || "DG-01";
-    const selectedSlot = code || firstAvailable;
+    const handleRegister = async () => {
+      if (!customName.trim()) {
+        setError("Please enter your Full Name.");
+        return;
+      }
+      if (!customCollege.trim()) {
+        setError("Please enter your College / Institution.");
+        return;
+      }
+      await verifyDirect(code.trim() || undefined, customName.trim(), customCollege.trim());
+    };
 
     return (
       <ParticipantShell online={online} go={go}>
@@ -633,25 +651,30 @@ function ParticipantApp({
             <ArrowLeft /> Home
           </button>
           <div className="join-card">
-            <Pill tone="green">PARTICIPANT LOGIN</Pill>
+            <Pill tone="green">PARTICIPANT CHECK-IN</Pill>
             <div className="scan-icon">
               <Users />
             </div>
-            <h1>Participant Login</h1>
-            <p>Enter your Name and College to log in and claim your badge for Round 1.</p>
+            <h1>Participant Check-In</h1>
+            <p>Enter your Name & College. Your unique Badge ID and Challenge will be assigned automatically.</p>
 
-            <label>YOUR FULL NAME <b style={{ color: "#00e5a3" }}>*REQUIRED</b></label>
+            <label style={{ fontSize: "11px", letterSpacing: "0.12em", color: "#a0aec0", fontWeight: 700, display: "block", marginBottom: "6px" }}>
+              YOUR FULL NAME <b style={{ color: "#00e5a3" }}>*REQUIRED</b>
+            </label>
             <input
               className="field"
               value={customName}
-              placeholder="e.g. Arjun S"
+              placeholder="e.g. Sundar P"
               onChange={(e) => {
                 setCustomName(e.target.value);
                 setError("");
               }}
+              autoFocus
             />
 
-            <label>COLLEGE / INSTITUTION <b style={{ color: "#00e5a3" }}>*REQUIRED</b></label>
+            <label style={{ fontSize: "11px", letterSpacing: "0.12em", color: "#a0aec0", fontWeight: 700, display: "block", marginBottom: "6px" }}>
+              COLLEGE / INSTITUTION <b style={{ color: "#00e5a3" }}>*REQUIRED</b>
+            </label>
             <input
               className="field"
               value={customCollege}
@@ -660,47 +683,10 @@ function ParticipantApp({
                 setCustomCollege(e.target.value);
                 setError("");
               }}
-            />
-
-            <button
-              type="button"
-              className="auto-assign-btn"
-              onClick={() => {
-                if (firstAvailable) {
-                  setCode(firstAvailable);
-                  claimSlot(firstAvailable);
-                }
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleRegister();
               }}
-            >
-              <Sparkles size={16} /> Quick Login · Auto-Claim Next Slot ({firstAvailable})
-            </button>
-
-            <div className="slot-summary-bar">
-              <label style={{ margin: 0 }}>SELECT BADGE SLOT</label>
-              <span>{availableSlots.length} of {sortedParticipants.length} available</span>
-            </div>
-
-            <div className="slot-grid">
-              {sortedParticipants.map((p) => {
-                const isTaken = p.status !== "REGISTERED" && p.code !== session;
-                const isSel = selectedSlot === p.code;
-                return (
-                  <button
-                    key={p.code}
-                    type="button"
-                    disabled={isTaken}
-                    className={`slot-btn ${isSel ? "selected" : ""} ${isTaken ? "taken" : ""}`}
-                    onClick={() => {
-                      setCode(p.code);
-                      setError("");
-                    }}
-                    title={isTaken ? `${p.code} is already checked in` : `Claim ${p.code}`}
-                  >
-                    {p.code}
-                  </button>
-                );
-              })}
-            </div>
+            />
 
             {error && (
               <div className="form-error">
@@ -708,15 +694,29 @@ function ParticipantApp({
               </div>
             )}
 
-            <button className="primary wide" onClick={() => claimSlot(selectedSlot)}>
-              LOG IN & CLAIM {selectedSlot} <ChevronRight />
+            <button
+              className="primary wide"
+              onClick={handleRegister}
+              disabled={registering}
+              style={{ minHeight: "48px", marginTop: "12px", fontSize: "14px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
+            >
+              {registering ? (
+                <>
+                  <RefreshCw className="animate-spin" size={16} /> Generating ID & Registering...
+                </>
+              ) : (
+                <>
+                  <Sparkles size={16} /> GET ID & ENTER ROUND 1 <ChevronRight />
+                </>
+              )}
             </button>
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "14px", fontSize: "12px" }}>
+
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: "18px", fontSize: "12px", borderTop: "1px solid #1a2233", paddingTop: "14px" }}>
               <a href="#" onClick={(e) => { e.preventDefault(); go("/verify"); }} style={{ color: "#70aaff" }}>
-                Already have an assigned badge? Enter with ID
+                Already have an assigned Badge ID? Enter with ID
               </a>
               <a href="#" onClick={(e) => { e.preventDefault(); go("/admin/login"); }} style={{ color: "#8590a4" }}>
-                Admin Dashboard
+                Admin
               </a>
             </div>
           </div>
