@@ -203,6 +203,80 @@ export async function writeStore(value: EventStore) {
         ON CONFLICT (id) DO UPDATE
         SET store = EXCLUDED.store, updated_at = EXCLUDED.updated_at
       `;
+
+      if (Array.isArray(value.participants)) {
+        if (value.participants.length === 0) {
+          await sql`DELETE FROM participants`;
+        } else {
+          const codes = value.participants.map((p) => p.code);
+          await sql`DELETE FROM participants WHERE code NOT IN ${sql(codes)}`;
+          for (const p of value.participants) {
+            await sql`
+              INSERT INTO participants (code, name, college, challenge, status, verified_at, submitted_at, prompt, submission_image, project_url, figma_url, updated_at)
+              VALUES (
+                ${p.code},
+                ${p.name || ""},
+                ${p.college || ""},
+                ${p.challenge || ""},
+                ${p.status || "REGISTERED"},
+                ${p.verifiedAt ? new Date(p.verifiedAt).toISOString() : null},
+                ${p.submittedAt ? new Date(p.submittedAt).toISOString() : null},
+                ${p.prompt || null},
+                ${p.submissionImage || null},
+                ${p.projectUrl || null},
+                ${p.figmaUrl || null},
+                NOW()
+              )
+              ON CONFLICT (code) DO UPDATE
+              SET name = EXCLUDED.name,
+                  college = EXCLUDED.college,
+                  challenge = EXCLUDED.challenge,
+                  status = EXCLUDED.status,
+                  verified_at = EXCLUDED.verified_at,
+                  submitted_at = EXCLUDED.submitted_at,
+                  prompt = EXCLUDED.prompt,
+                  submission_image = EXCLUDED.submission_image,
+                  project_url = EXCLUDED.project_url,
+                  figma_url = EXCLUDED.figma_url,
+                  updated_at = NOW()
+            `;
+          }
+        }
+      }
+
+      if (Array.isArray(value.challenges)) {
+        if (value.challenges.length === 0) {
+          await sql`DELETE FROM challenges`;
+        } else {
+          const cCodes = value.challenges.map((c) => c.code);
+          await sql`DELETE FROM challenges WHERE code NOT IN ${sql(cCodes)}`;
+          for (const c of value.challenges) {
+            await sql`
+              INSERT INTO challenges (code, title, difficulty, color, description, image_url, specs, category, updated_at)
+              VALUES (
+                ${c.code},
+                ${c.title || ""},
+                ${c.difficulty || "Medium"},
+                ${c.color || "#7357ff"},
+                ${c.description || ""},
+                ${c.imageUrl || ""},
+                ${sql.json(c.specs || [])},
+                ${c.category || "Mobile"},
+                NOW()
+              )
+              ON CONFLICT (code) DO UPDATE
+              SET title = EXCLUDED.title,
+                  difficulty = EXCLUDED.difficulty,
+                  color = EXCLUDED.color,
+                  description = EXCLUDED.description,
+                  image_url = EXCLUDED.image_url,
+                  specs = EXCLUDED.specs,
+                  category = EXCLUDED.category,
+                  updated_at = NOW()
+            `;
+          }
+        }
+      }
     } catch (e) {
       console.warn("SQL write fallback:", e);
     }
