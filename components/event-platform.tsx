@@ -2,7 +2,7 @@
 // @ts-nocheck
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -67,6 +67,8 @@ type Participant = {
   submittedAt?: string;
   projectUrl?: string;
   figmaUrl?: string;
+  prompt?: string;
+  submissionImage?: string;
 };
 type Challenge = {
   code: string;
@@ -88,8 +90,6 @@ type Store = {
   startedAt?: number;
   grace: number;
 };
-
-const challenges: Challenge[] = [];
 
 const initial: Store = {
   status: "WAITING",
@@ -120,7 +120,6 @@ const safeLoad = (): Store => {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed.challenges)) {
-          // Filter out default old mock sample names without custom uploads
           loadedChallenges = parsed.challenges.filter(
             (c: Challenge) => c.imageUrl || (c.title !== "Commerce Mobile" && c.title !== "Fintech Dashboard" && c.title !== "Travel Discovery" && c.title !== "Food Delivery")
           );
@@ -155,6 +154,42 @@ const safeLoad = (): Store => {
 const formatTime = (sec: number) =>
   `${String(Math.floor(Math.max(sec, 0) / 60)).padStart(2, "0")}:${String(Math.max(sec, 0) % 60).padStart(2, "0")}`;
 
+// Isolated live countdown hook that doesn't trigger parent component re-renders
+function useLiveTime(store: Store, onExpire?: () => void) {
+  const [seconds, setSeconds] = useState(() => {
+    if (store.status === "LIVE" && store.endsAt) {
+      return Math.max(0, Math.ceil((store.endsAt - Date.now()) / 1000));
+    }
+    return store.pausedRemaining;
+  });
+
+  useEffect(() => {
+    if (store.status !== "LIVE" || !store.endsAt) {
+      setSeconds(store.pausedRemaining);
+      return;
+    }
+
+    const calc = () => {
+      const rem = Math.max(0, Math.ceil((store.endsAt! - Date.now()) / 1000));
+      setSeconds(rem);
+      if (rem <= 0 && onExpire) {
+        onExpire();
+      }
+    };
+
+    calc();
+    const interval = setInterval(calc, 1000);
+    return () => clearInterval(interval);
+  }, [store.status, store.endsAt, store.pausedRemaining, onExpire]);
+
+  return seconds;
+}
+
+const LiveTimerDisplay = React.memo(function LiveTimerDisplay({ store, className = "" }: { store: Store; className?: string }) {
+  const sec = useLiveTime(store);
+  return <span className={className}>{formatTime(sec)}</span>;
+});
+
 const processImageFile = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith("image/")) {
@@ -164,21 +199,21 @@ const processImageFile = (file: File): Promise<string> => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const result = e.target?.result as string;
-      if (file.type === "image/svg+xml" || file.size < 500000) {
+      if (file.type === "image/svg+xml" || file.size < 400000) {
         resolve(result);
         return;
       }
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement("canvas");
-        const MAX_WIDTH = 1400;
+        const MAX_WIDTH = 1200;
         const scale = Math.min(1, MAX_WIDTH / img.width);
         canvas.width = Math.round(img.width * scale);
         canvas.height = Math.round(img.height * scale);
         const ctx = canvas.getContext("2d");
         if (ctx) {
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          resolve(canvas.toDataURL("image/webp", 0.88));
+          resolve(canvas.toDataURL("image/webp", 0.85));
         } else {
           resolve(result);
         }
@@ -210,17 +245,6 @@ function Pill({ children, tone = "violet" }: { children: React.ReactNode; tone?:
   return <span className={`pill ${tone}`}>{children}</span>;
 }
 
-function useClock(store: Store) {
-  const [tick, setTick] = useState(Date.now());
-  useEffect(() => {
-    const i = setInterval(() => setTick(Date.now()), 1000);
-    return () => clearInterval(i);
-  }, []);
-  return store.status === "LIVE" && store.endsAt
-    ? Math.max(0, Math.ceil((store.endsAt - tick) / 1000))
-    : store.pausedRemaining;
-}
-
 export default function EventPlatform() {
   const [path, setPath] = useState("/");
   const [store, setStore] = useState<Store>(initial);
@@ -247,6 +271,8 @@ export default function EventPlatform() {
 
   useEffect(() => {
     if (!ready) return;
+    let isMounted = true;
+
     const sync = async () => {
       const admin = path.startsWith("/admin") && path !== "/admin/login";
       const participant = !admin && !["/", "/verify", "/recover", "/live", "/join", "/login"].includes(path);
@@ -262,10 +288,17 @@ export default function EventPlatform() {
       }
       try {
         const r = await fetch(url, { headers, cache: "no-store" });
-        if (r.ok) {
+        if (r.ok && isMounted) {
           const d = await r.json();
           if (d.store) {
             setStore((current) => {
+              // Deep equality check on crucial fields to skip redundant state updates
+              const isSameStatus = current.status === d.store.status;
+              const isSameEndsAt = current.endsAt === d.store.endsAt;
+              const isSamePaused = current.pausedRemaining === d.store.pausedRemaining;
+              const isSamePartCount = current.participants.length === (d.store.participants?.length ?? (d.person ? 1 : 0));
+              const isSameChalCount = current.challenges.length === (d.store.challenges?.length ?? 0);
+
               let merged = current.participants;
               if (Array.isArray(d.store.participants) && d.store.participants.length > 0) {
                 merged = d.store.participants;
@@ -303,49 +336,56 @@ export default function EventPlatform() {
                 });
               }
 
-              const nextState: Store = {
+              return {
                 ...current,
                 ...d.store,
                 participants: merged,
                 challenges: mergedChallenges,
               };
-
-              try {
-                localStorage.setItem(STORE, JSON.stringify(nextState));
-                localStorage.setItem(CHALLENGES_STORAGE, JSON.stringify(mergedChallenges));
-              } catch {}
-
-              return nextState;
             });
             if (d.person) {
               localStorage.setItem(SESSION, d.person.code);
-              setSession(d.person.code);
             }
           }
         }
       } catch {}
     };
+
     sync();
     const timer = setInterval(sync, 4000);
-    return () => clearInterval(timer);
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
   }, [ready, path]);
 
+  // Debounced, safe localStorage persist that doesn't freeze the main UI thread
   useEffect(() => {
-    if (ready) {
+    if (!ready) return;
+    const t = setTimeout(() => {
       try {
         localStorage.setItem(STORE, JSON.stringify(store));
         if (store.challenges?.length) {
           localStorage.setItem(CHALLENGES_STORAGE, JSON.stringify(store.challenges));
         }
-      } catch {}
-    }
+      } catch {
+        try {
+          const lightweightStore = {
+            ...store,
+            participants: store.participants.map((p) => ({ ...p, submissionImage: undefined })),
+          };
+          localStorage.setItem(STORE, JSON.stringify(lightweightStore));
+        } catch {}
+      }
+    }, 600);
+    return () => clearTimeout(t);
   }, [store, ready]);
 
-  const go = (p: string) => {
+  const go = useCallback((p: string) => {
     history.pushState({}, "", p);
     setPath(p);
     scrollTo(0, 0);
-  };
+  }, []);
 
   if (!ready)
     return (
@@ -429,9 +469,14 @@ function ParticipantApp({
   const [confirm, setConfirm] = useState(false);
   const [fullscreenRef, setFullscreenRef] = useState(false);
   const subFileInputRef = useRef<HTMLInputElement>(null);
-  const remaining = useClock(store);
 
   const [registering, setRegistering] = useState(false);
+
+  const handleExpire = useCallback(() => {
+    if (store.status === "LIVE") {
+      setStore((prev) => ({ ...prev, status: "ENDED", pausedRemaining: 0, endsAt: null }));
+    }
+  }, [store.status, setStore]);
 
   const verifyDirect = useCallback(async (id?: string, name?: string, college?: string) => {
     try {
@@ -468,7 +513,7 @@ function ParticipantApp({
     }
   }, [go, setStore]);
 
-  // Check URL query params for auto-verification on load (e.g. ?id=DG-01 or ?code=DG-01)
+  // Check URL query params for auto-verification on load
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const idParam = (params.get("id") || params.get("code") || "").toUpperCase().trim();
@@ -495,24 +540,24 @@ function ParticipantApp({
     }
   }, [path, store.status, session, go]);
 
-  const person =
-    store.participants.find((p) => p.code === session) ||
-    (session
-      ? {
-          code: session,
-          name: customName || "Participant",
-          college: customCollege || "General",
-          challenge: store.challenges[0]?.code || "",
-          status: (store.status === "LIVE" ? "ACTIVE" : "VERIFIED") as PStatus,
-        }
-      : null);
-  const challenge = store.challenges.find((c) => c.code === person?.challenge) || store.challenges[0];
+  const person = useMemo(() => {
+    return (
+      store.participants.find((p) => p.code === session) ||
+      (session
+        ? {
+            code: session,
+            name: customName || "Participant",
+            college: customCollege || "General",
+            challenge: store.challenges[0]?.code || "",
+            status: (store.status === "LIVE" ? "ACTIVE" : "VERIFIED") as PStatus,
+          }
+        : null)
+    );
+  }, [store.participants, store.challenges, store.status, session, customName, customCollege]);
 
-  useEffect(() => {
-    if (store.status === "LIVE" && remaining <= 0) {
-      setStore((prev) => ({ ...prev, status: "ENDED", pausedRemaining: 0, endsAt: null }));
-    }
-  }, [remaining, store.status]);
+  const challenge = useMemo(() => {
+    return store.challenges.find((c) => c.code === person?.challenge) || store.challenges[0];
+  }, [store.challenges, person?.challenge]);
 
   const verify = async () => {
     const id = code.trim().toUpperCase();
@@ -521,22 +566,6 @@ function ParticipantApp({
       return;
     }
     await verifyDirect(id);
-  };
-
-  const claimSlot = async (selectedCode: string) => {
-    if (!customName.trim()) {
-      setError("Please enter your Full Name.");
-      return;
-    }
-    if (!customCollege.trim()) {
-      setError("Please enter your College / Institution.");
-      return;
-    }
-    if (!selectedCode) {
-      setError("Please select a participant slot.");
-      return;
-    }
-    await verifyDirect(selectedCode, customName.trim(), customCollege.trim());
   };
 
   const submit = async () => {
@@ -1050,11 +1079,13 @@ function ParticipantApp({
               {person.code} · {person.challenge}
             </p>
           </div>
-          <div className={`timer ${remaining < 300 ? "urgent" : ""}`}>
+          <div className="timer">
             <Clock3 />
             <div>
               <small>TIME REMAINING</small>
-              <b>{store.status === "PAUSED" ? "PAUSED" : formatTime(remaining)}</b>
+              <b>
+                {store.status === "PAUSED" ? "PAUSED" : <LiveTimerDisplay store={store} />}
+              </b>
             </div>
           </div>
         </div>
@@ -1309,7 +1340,6 @@ function Admin({
   const [confirm, setConfirm] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [mobileNav, setMobileNav] = useState(false);
-  const remaining = useClock(store);
 
   const handleAdminLogin = async () => {
     try {
@@ -1471,11 +1501,11 @@ function Admin({
     ["/admin/recovery", RefreshCw, "Recovery"],
   ] as const;
 
-  const stats = {
+  const stats = useMemo(() => ({
     verified: store.participants.filter((p) => p.status !== "REGISTERED").length,
     active: store.participants.filter((p) => p.status === "ACTIVE").length,
     submitted: store.participants.filter((p) => p.status === "SUBMITTED").length,
-  };
+  }), [store.participants]);
 
   const exportCsv = (type: "submissions" | "assignments") => {
     const head =
@@ -1563,13 +1593,13 @@ function Admin({
           ) : path === "/admin/assignments" ? (
             <Assignments store={store} setStore={persist} exportCsv={exportCsv} />
           ) : path === "/admin/round" ? (
-            <RoundControl store={store} remaining={remaining} ask={setConfirm} />
+            <RoundControl store={store} ask={setConfirm} />
           ) : path === "/admin/health" ? (
             <Health store={store} />
           ) : path === "/admin/recovery" ? (
             <Recovery store={store} setStore={persist} />
           ) : (
-            <Overview store={store} stats={stats} remaining={remaining} ask={setConfirm} exportCsv={exportCsv} />
+            <Overview store={store} stats={stats} ask={setConfirm} exportCsv={exportCsv} />
           )}
         </div>
       </section>
@@ -1601,6 +1631,26 @@ function PageTitle({ eyebrow, title, action }: { eyebrow: string; title: string;
     </div>
   );
 }
+
+const BadgeCardItem = React.memo(function BadgeCardItem({ p, origin }: { p: Participant; origin: string }) {
+  const directUrl = `${origin}/verify?id=${p.code}`;
+  return (
+    <div className="badge-card" key={p.code}>
+      <div className="badge-top">
+        <Pill tone={p.status === "SUBMITTED" ? "green" : p.status === "ACTIVE" ? "blue" : "violet"}>
+          {p.challenge || "ROOKIE"}
+        </Pill>
+        <small style={{ color: "#6e798d", fontSize: "9px" }}>ROUND 01</small>
+      </div>
+      <h3>{p.code}</h3>
+      <span>{p.name || "Participant"}</span>
+      <div className="badge-qr" style={{ background: "#ffffff", padding: "8px", borderRadius: "10px", margin: "10px auto", display: "inline-grid", placeItems: "center" }}>
+        <QRCodeSVG value={directUrl} size={110} fgColor="#05070a" bgColor="#ffffff" />
+      </div>
+      <small className="badge-foot">Scan to Login Directly</small>
+    </div>
+  );
+});
 
 function BadgeCenter({ store, setStore }: { store: Store; setStore?: (s: Store) => void }) {
   const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
@@ -1692,25 +1742,9 @@ function BadgeCenter({ store, setStore }: { store: Store; setStore?: (s: Store) 
         </div>
       ) : (
         <div className="badge-grid">
-          {store.participants.map((p) => {
-            const directUrl = `${origin}/verify?id=${p.code}`;
-            return (
-              <div className="badge-card" key={p.code}>
-                <div className="badge-top">
-                  <Pill tone={p.status === "SUBMITTED" ? "green" : p.status === "ACTIVE" ? "blue" : "violet"}>
-                    {p.challenge || "ROOKIE"}
-                  </Pill>
-                  <small style={{ color: "#6e798d", fontSize: "9px" }}>ROUND 01</small>
-                </div>
-                <h3>{p.code}</h3>
-                <span>{p.name || "Participant"}</span>
-                <div className="badge-qr" style={{ background: "#ffffff", padding: "8px", borderRadius: "10px", margin: "10px auto", display: "inline-grid", placeItems: "center" }}>
-                  <QRCodeSVG value={directUrl} size={110} fgColor="#05070a" bgColor="#ffffff" />
-                </div>
-                <small className="badge-foot">Scan to Login Directly</small>
-              </div>
-            );
-          })}
+          {store.participants.map((p) => (
+            <BadgeCardItem key={p.code} p={p} origin={origin} />
+          ))}
         </div>
       )}
     </>
@@ -1720,13 +1754,11 @@ function BadgeCenter({ store, setStore }: { store: Store; setStore?: (s: Store) 
 function Overview({
   store,
   stats,
-  remaining,
   ask,
   exportCsv,
 }: {
   store: Store;
   stats: any;
-  remaining: number;
   ask: (s: string) => void;
   exportCsv: (t: "submissions" | "assignments") => void;
 }) {
@@ -1749,7 +1781,7 @@ function Overview({
         </div>
         <div className="big-time">
           <Clock3 />
-          <b>{formatTime(remaining)}</b>
+          <b><LiveTimerDisplay store={store} /></b>
         </div>
         <div className="quick-controls">
           {store.status === "LIVE" ? (
@@ -2037,9 +2069,13 @@ function Participants({
   search: string;
   setSearch: (s: string) => void;
 }) {
-  const list = store.participants.filter((p) =>
-    (p.code + p.name + p.college + p.challenge).toLowerCase().includes(search.toLowerCase())
-  );
+  const list = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    if (!q) return store.participants;
+    return store.participants.filter((p) =>
+      (p.code + p.name + p.college + p.challenge).toLowerCase().includes(q)
+    );
+  }, [store.participants, search]);
 
   const handleDelete = async (code: string) => {
     const nextList = store.participants.filter((p) => p.code !== code);
@@ -2788,11 +2824,9 @@ function Assignments({
 
 function RoundControl({
   store,
-  remaining,
   ask,
 }: {
   store: Store;
-  remaining: number;
   ask: (s: string) => void;
 }) {
   const actions = [
@@ -2813,7 +2847,7 @@ function RoundControl({
             {store.status}
           </Pill>
           <span>TIME REMAINING</span>
-          <b>{formatTime(remaining)}</b>
+          <b><LiveTimerDisplay store={store} /></b>
           <p>Server-style synchronized round clock</p>
         </div>
         <div className="control-list">
@@ -2942,9 +2976,8 @@ function Recovery({ store, setStore }: { store: Store; setStore: (s: Store) => v
 }
 
 function Projector({ store, go }: { store: Store; go: (p: string) => void }) {
-  const remaining = useClock(store);
-  const submitted = store.participants.filter((p) => p.status === "SUBMITTED").length;
-  const active = store.participants.filter((p) => p.status === "ACTIVE").length;
+  const submitted = useMemo(() => store.participants.filter((p) => p.status === "SUBMITTED").length, [store.participants]);
+  const active = useMemo(() => store.participants.filter((p) => p.status === "ACTIVE").length, [store.participants]);
   const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:5173";
   const joinUrl = `${origin}/join`;
 
@@ -2997,7 +3030,9 @@ function Projector({ store, go }: { store: Store; go: (p: string) => void }) {
             </Pill>
             <h1>{store.status === "PAUSED" ? "The mirror is paused" : "Time remaining"}</h1>
           </div>
-          <b className="projector-time">{store.status === "PAUSED" ? "PAUSED" : formatTime(remaining)}</b>
+          <b className="projector-time">
+            {store.status === "PAUSED" ? "PAUSED" : <LiveTimerDisplay store={store} />}
+          </b>
           <div className="projector-stats">
             <div>
               <span>PARTICIPANTS</span>

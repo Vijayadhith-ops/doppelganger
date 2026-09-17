@@ -2,7 +2,9 @@
 import React, { useEffect, useState } from "react";
 import QRCode from "qrcode";
 
-export function QRCodeSVG({
+const qrSvgCache = new Map<string, string>();
+
+export const QRCodeSVG = React.memo(function QRCodeSVG({
   value,
   size = 180,
   fgColor = "#000000",
@@ -15,12 +17,17 @@ export function QRCodeSVG({
   bgColor?: string;
   className?: string;
 }) {
-  const [svgXml, setSvgXml] = useState<string>("");
+  const text = value || "https://doppelganger.site";
+  const cacheKey = `${text}_${size}_${fgColor}_${bgColor}`;
+  const [svgXml, setSvgXml] = useState<string>(() => qrSvgCache.get(cacheKey) || "");
 
   useEffect(() => {
-    let isMounted = true;
-    const text = value || "https://doppelganger.site";
+    if (qrSvgCache.has(cacheKey)) {
+      setSvgXml(qrSvgCache.get(cacheKey)!);
+      return;
+    }
 
+    let isMounted = true;
     QRCode.toString(text, {
       type: "svg",
       errorCorrectionLevel: "M",
@@ -32,6 +39,7 @@ export function QRCodeSVG({
       width: size,
     })
       .then((xml) => {
+        qrSvgCache.set(cacheKey, xml);
         if (isMounted) setSvgXml(xml);
       })
       .catch((err) => {
@@ -41,7 +49,7 @@ export function QRCodeSVG({
     return () => {
       isMounted = false;
     };
-  }, [value, size, fgColor, bgColor]);
+  }, [cacheKey, text, size, fgColor, bgColor]);
 
   if (!svgXml) {
     return (
@@ -73,4 +81,5 @@ export function QRCodeSVG({
       dangerouslySetInnerHTML={{ __html: svgXml }}
     />
   );
-}
+});
+
